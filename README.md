@@ -1,6 +1,6 @@
 # Real-Time TCP Chat Application
 
-![Chat Window Preview](chat_window.png)
+![Login Window Preview](screenshots/login_window.png)
 
 A multithreaded, real-time chat application built with Python sockets, Tkinter GUI, and a Redis backend, fully containerized for easy deployment.
 
@@ -17,7 +17,7 @@ This is a personal project I developed to learn about Redis and the use of Docke
 
 ## Application Interface
 
-| ![Login Screen](login_window.png) | ![Main Menu](main_window.png) |
+| ![Chat Window](screenshots/chat_window.png) | ![Main Menu](screenshots/main_window.png) |
 |:---:|:---:|
 | *Secure Login & Registration* | *Chat selection and user management* |
 
