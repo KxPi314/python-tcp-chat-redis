@@ -82,6 +82,8 @@ def check_request(size: int, request: str):
         envelope.payload = validated_payload
         return True, envelope
     except ValidationError as e:
-        return False, f"validation Error: {e.json()}"
+        error_detail = e.errors()[0]
+        field_name = error_detail.get('loc', [''])[0]
+        return False, f"validation error '{field_name}'. check if input length is correct."
     except json.JSONDecodeError:
         return False, "JSON format Error"

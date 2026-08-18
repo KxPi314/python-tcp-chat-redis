@@ -1,22 +1,23 @@
 from redis import Redis
 import bcrypt
+import os
 
 class db_handler:
     redis_port = 6379
     r: Redis
 
     def __init__(self):
+        redis_host = os.getenv("REDIS_HOST", "localhost")
         try:
             self.r = Redis(
-                host="localhost", 
+                host=redis_host, 
                 port=self.redis_port, 
                 decode_responses=True
             )
             self.r.ping()
         except Exception as e:
             print(f"Error occurred while connecting to redis db: {e}")
-            return
-        
+            
     def user_login_request(self, user_login, user_password):
         user_id = self.r.hget("users:by_login", user_login)
         if not user_id:
@@ -111,9 +112,6 @@ class db_handler:
     
 
     def add_new_chat(self, chat_name, user_id, new_members_logins: list[str]):
-        if not new_members_logins:
-            return False, []
-        
         if self.r.hexists("chats:by_name",chat_name):
             return False, []
         

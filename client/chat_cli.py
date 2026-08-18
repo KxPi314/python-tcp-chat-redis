@@ -1,88 +1,92 @@
 import socket
-import sys
 import threading
 import json
 from queue import Queue
 
 class Client:
-    def __init__(self, host='localhost', port=50000):
+    def __init__(self, host: str = 'localhost', port: int = 50000):
         self.host = host
         self.port = port
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket = None
+        self.is_connected = False
         self.notifications = Queue(maxsize=256)
         self.server_responses = Queue(maxsize=256)
-       
-    def connect(self):
+
+    def connect(self) -> bool:
         try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.connect((self.host, self.port))
-            print(f"Połączono z serwerem {self.host}:{self.port}")
-            t = threading.Thread(target=self.server_listener)
-            t.daemon = True
-            t.start()
-        except Exception as e:
-            print(f"Nie udało się połączyć: {e}")
-            sys.exit(1)
-
-    def server_listener(self):
-        print(f"Communication with server started") 
-        try:
-            while True:
-                package_size = self.recv_exactly(self.socket, 4)
-                if not package_size:
-                    break
-                package_size = package_size.decode("utf-8")
-                if not package_size.isdigit():
-                        print(f"communication error from: invalid header {package_size}")
-                        break
-                try:
-                    package_size = int(package_size)
-                except ValueError:
-                    print ("Error reading package header")
-                    break
-
-                request = self.recv_exactly(self.socket, package_size)
-                if not request:
-                    break
-                if len(request) != package_size:
-                    print("Error package_size doesnt match")
-                request = request.decode('utf-8')
-                
-                valid = self.groupe_server_msg(request)
-                if not valid:
-                    print("Error cant parse server msg")
-                    continue
-        except (ConnectionResetError, socket.timeout, Exception) as e:
-            print(f"disconnected/error: {e}")
-        finally:
-            self.socket.close()
-
-    def recv_exactly(self, sock, n_bytes):
-            data = b''
-            while len(data) < n_bytes:
-                try:
-                    chunk = sock.recv(n_bytes - len(data))
-                    if not chunk:
-                        return None
-                    data += chunk
-                except socket.timeout:
-                    return None
-            return data
-
-    def groupe_server_msg(self, response):
-        try:
-            data = json.loads(response)
-            status = data.get("status")
+            self.is_connected = True
             
+            t = threading.Thread(target=self._server_listener, daemon=True)
+            t.start()
+            print(f"Connected to server {self.host}:{self.port}")
+            return True
+        except Exception as e:
+            print(f"Connection Error: {e}")
+            self.is_connected = False
+            if self.socket:
+                self.socket.close()
+            return False
+
+    def _recv_exactly(self, sock: socket.socket, n_bytes: int) -> bytes | None:
+        data = b''
+        while len(data) < n_bytes:
+            try:
+                chunk = sock.recv(n_bytes - len(data))
+                if not chunk:
+                    return None
+                data += chunk
+            except (socket.timeout, OSError):
+                return None
+        return data
+
+    def _server_listener(self):
+        try:
+            while self.is_connected:
+                header = self._recv_exactly(self.socket, 4)
+                if not header:
+                    break
+                
+                header_str = header.decode('utf-8')
+                if not header_str.isdigit():
+                    print(f"Protocol error invalid header {header_str}")
+                    break
+
+                package_size = int(header_str)
+                payload_bytes = self._recv_exactly(self.socket, package_size)
+                if not payload_bytes:
+                    break
+
+                self._handle_incoming_payload(payload_bytes.decode('utf-8'))
+        except (ConnectionResetError, socket.timeout, Exception) as e:
+            print(f"Disconnected / listening error: {e}")
+        finally:
+            self.disconnect()
+
+    def _handle_incoming_payload(self, response_str: str):
+        try:
+            data = json.loads(response_str)
+            status = data.get("status")
             if status == "notification":
                 self.notifications.put(data.get("msg"))
             else:
                 success = (status == "success")
                 self.server_responses.put((success, data))
-            return True
-        except Exception as e:
-            print(f"Error parsing server response: {e}")
-            return False
-        
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing Error: {e}")
+
+    def _send_payload(self, action: str, payload: dict):
+        if not self.is_connected or not self.socket:
+            return
+        try:
+            message = json.dumps({"action": action, "payload": payload}).encode('utf-8')
+            full_packet = f"{len(message):04d}".encode('utf-8') + message
+            self.socket.sendall(full_packet)
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            print(f"Payload sending Error: {e}")
+            self.disconnect()
+
     def get_response(self):
         return self.server_responses.get()
 
@@ -90,114 +94,54 @@ class Client:
         return self.notifications.get()
 
     def send_login_request(self, user_login: str, user_password: str):
-        message = json.dumps({
-            "action": "login",
-            "payload" : {
-                "username" : user_login,
-                "password" : user_password
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-        
+        self._send_payload("login", {"username": user_login, "password": user_password})
+
     def send_register_request(self, user_login: str, user_password: str):
-        message = json.dumps({
-            "action": "register",
-            "payload" : {
-                "username" : user_login,
-                "password" : user_password
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-        
+        self._send_payload("register", {"username": user_login, "password": user_password})
 
-    def send_msg_request(self, chat_name, text):
-        message = json.dumps({
-            "action": "msg",
-            "payload" : {
-                "text" : text,
-                "to_chat" : chat_name
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
+    def send_msg_request(self, chat_name: str, text: str):
+        self._send_payload("msg", {"text": text, "to_chat": chat_name})
 
-    def send_del_account_request(self, reason = "None"):
-        message = json.dumps({
-            "action": "delete_account",
-            "payload" : {
-                "reason" : reason
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-        
+    def send_del_account_request(self, reason: str = "None"):
+        self._send_payload("delete_account", {"reason": reason})
 
-    def send_del_from_chat_request(self, chat_name, user_name):
-        message = json.dumps({
-            "action": "del_from_chat",
-            "payload" : {
-                "chat_name" : chat_name,
-                "user_name": user_name
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-     
+    def send_del_from_chat_request(self, chat_name: str, user_name: str):
+        self._send_payload("del_from_chat", {"chat_name": chat_name, "user_name": user_name})
 
-    def send_chat_sync_request(self, chat_name, newest_message_id_known, limit = 20):
-        message = json.dumps({
-            "action": "sync_chat",
-            "payload" : {
-                "chat_name" : chat_name,
-                "limit": limit,
-                "newest_message_id_known": newest_message_id_known
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-     
+    def send_chat_sync_request(self, chat_name: str, newest_message_id_known: str, limit: int = 20):
+        self._send_payload("sync_chat", {
+            "chat_name": chat_name,
+            "limit": limit,
+            "newest_message_id_known": str(newest_message_id_known)
+        })
 
-    def send_chat_history_request(self, chat_name, last_message_id_seen, limit = 20):
-        message = json.dumps({
-            "action": "chat_history",
-            "payload" : {
-                "chat_name" : chat_name,
-                "limit": limit,
-                "last_message_id_seen": last_message_id_seen
-                }
-                }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
+    def send_chat_history_request(self, chat_name: str, last_message_id_seen: str, limit: int = 20):
+        self._send_payload("chat_history", {
+            "chat_name": chat_name,
+            "limit": limit,
+            "last_message_id_seen": str(last_message_id_seen)
+        })
 
     def send_new_chat_request(self, chat_name: str, user_list: list[str]):
-        message = json.dumps({
-            "action": "new_chat",
-            "payload" : {
-                "chat_name" : chat_name,
-                "members": user_list
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
+        self._send_payload("new_chat", {"chat_name": chat_name, "members": user_list})
 
     def send_add_to_chat_request(self, chat_name: str, user_name: str):
-        message = json.dumps({
-            "action": "add_to_chat",
-            "payload" : {
-                "chat_name" : chat_name,
-                "user_name": user_name
-                }
-            }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-        
+        self._send_payload("add_to_chat", {"chat_name": chat_name, "user_name": user_name})
+
     def send_user_list_request(self):
-        message = json.dumps({"action": "users_list", "payload": {}}).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-        
+        self._send_payload("users_list", {})
+
     def send_chats_list_request(self):
-        message = json.dumps({"action": "chats_list", "payload": {}}).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
-    
-    def send_chat_members_list_request(self, chat_name):
-        message = json.dumps({
-            "action": "chat_members_list", 
-            "payload": {"chat_name": chat_name}
-        }).encode('utf-8')
-        self.socket.sendall(f"{len(message):04d}".encode('utf-8')+message)
+        self._send_payload("chats_list", {})
+
+    def send_chat_members_list_request(self, chat_name: str):
+        self._send_payload("chat_members_list", {"chat_name": chat_name})
 
     def disconnect(self):
-        self.socket.close()
+        self.is_connected = False
+        if self.socket:
+            try:
+                self.socket.close()
+            except OSError:
+                pass
+            self.socket = None
