@@ -19,7 +19,7 @@ This is a personal project I developed to learn about Redis and the use of Docke
 
 | ![Chat Window](screenshots/chat_window.png) | ![Main Menu](screenshots/main_window.png) |
 |:---:|:---:|
-| *Secure Login & Registration* | *Chat selection and user management* |
+| *Chat window* | *Main menu* |
 
 ## Database Schema (Redis)
 Redis is the perfect match for this type of project. It is incredibly fast, and its **Streams** data structure is natively optimized for appending and reading chat logs based on timestamps or IDs.
