@@ -40,7 +40,7 @@ The database structure in this project relies on Hashes, Sets, and Streams:
 * `chat:{id}:members` (Set) – IDs of participants in a specific chat.
 * `chat:{id}:messages` (Stream) – Chronological chat log.
 
-> **Note on Deletion:** Users can delete their accounts permanently. When this happens, their credentials and username are freed up, but their historical messages remain intact in the chat streams to preserve conversation context. Empty chats (with 0 members) are automatically garbage-collected.
+> **Note on Deletion:** Users can delete their accounts permanently. When this happens, their credentials and username are freed up, but their historical messages remain intact in the chat streams to preserve conversation context. Empty chats (with 0 members) are automatically removed.
 
 ## How to Run the Project Locally
 **Prerequisites:**
