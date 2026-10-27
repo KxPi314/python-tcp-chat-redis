@@ -1,4 +1,4 @@
-# Real-Time TCP Chat Application
+# Real-Time Chat Application
 
 ![Login Window Preview](screenshots/login_window.png)
 
